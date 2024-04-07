@@ -16,8 +16,18 @@ FirebaseAuth auth;
 FirebaseData fbdo;
 
 String devicePath = "/esp32-4H926S9A/smartLamp/";
+String sensorPath = "/esp32-4H926S9A/sensor/";
+
 String uid;
 // Creates path to given resource variable.
+String getSensorPath(const String &variable_path, const String &homegroupId)
+{
+    String result = "homegroups/";
+    result.concat(homegroupId);
+    result.concat(sensorPath);
+    result.concat(variable_path);
+    return result;
+}
 String resourcePath(const String &variable_path, const String &homegroupId)
 {
     String result = "homegroups/";

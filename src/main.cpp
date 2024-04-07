@@ -20,6 +20,11 @@
 #include <EEPROM.h>
 #include <BluetoothHelper.h>
 #include <ezButton.h>
+#include <DHT.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+#include "time.h"
+#include <stdio.h>
 
 // Insert your network credentials
 // #define WIFI_SSID "TTNET_ZyXEL_3JN3"
@@ -28,14 +33,21 @@
 // #define WIFI_PASSWORD "ataturk_1881"
 // #define WIFI_PASSWORD "test12345"
 // #define WIFI_PASSWORD "fnsc2964"
-
+#define DHTPIN 27 // DHT11 sensörünün bağlı olduğu pin
 #define encoderPinA 25
 #define encoderPinB 26
-#define BUTTON_PIN 27
+#define BUTTON_PIN 15
 #define BAUD_RATE 115200
 ezButton button(BUTTON_PIN); // create ezButton object that attach to pin 7;
-
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+WiFiUDP ntpUDP;
+const char *ntpServer = "tr.pool.ntp.org";
 // variables will change:
+const long gmtOffset_sec = 3600;
+const int daylightOffset_sec = 3600;
+unsigned long previousMillis = 0;
+const long interval = 180000; // 3 dakika
 int led_state = LOW;
 volatile int encoderValue = 0;
 volatile int lastEncoded = 0;
@@ -52,6 +64,43 @@ bool isCompleted = false;
 int localBrightness = 128;
 unsigned long sendDataPrevMillis = 0;
 int count = 10;
+
+void sendTemperatureData(float heat, float humidity,String dateTime)
+{
+  Firebase.RTDB.setInt(&fbdo, getSensorPath("heat", homegroupId), heat);
+  Firebase.RTDB.setInt(&fbdo, getSensorPath("humidity", homegroupId), humidity);
+  Firebase.RTDB.setString(&fbdo, getSensorPath("dateTime", homegroupId), dateTime);
+  Serial.println("Data sent to database");
+  Serial.print("Sıcaklık: ");
+  Serial.print(heat);
+  Serial.print(" °C, Nem: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+}
+
+void readDHT11()
+{
+  struct tm timeinfo;
+  char buffer[80];
+  if (!getLocalTime(&timeinfo))
+  {
+    Serial.println("Failed to obtain time");
+    return;
+  }
+
+  strftime(buffer, 80, "%DT%T", &timeinfo);
+  Serial.println(buffer);
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+
+  // Check if any reads failed and exit early (to try again).
+  if (isnan(h) || isnan(t))
+  {
+    Serial.println(F("Failed to read from DHT sensor!"));
+    return;
+  }
+  sendTemperatureData(t, h,buffer);
+}
 
 void handleEncoder()
 {
@@ -123,6 +172,7 @@ void completeSetup()
 
 void setup()
 {
+  dht.begin();
   pinMode(encoderPinA, INPUT_PULLUP);
   pinMode(encoderPinB, INPUT_PULLUP);
   button.setDebounceTime(50);
@@ -141,6 +191,8 @@ void setup()
     setupCallback = &completeSetup;
     startBLE();
     isCompleted = true;
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    setenv("TZ", "<+03>-3", 1);
   }
   else
   {
@@ -153,6 +205,8 @@ void setup()
     Serial.print("İlk değer");
     Serial.println(localBrightness);
     isCompleted = true;
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    setenv("TZ", "<+03>-3", 1);
   }
 }
 void updateFirebaseWithLocalData()
@@ -180,6 +234,20 @@ void loop()
     Serial.print("Button State: ");
     Serial.println(buttonState);
   }
+
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval)
+  {
+
+    // Get time and date information
+    // Zaman geldiğinde DHT11 sensöründen veri oku
+    readDHT11();
+
+    // Zamanı güncelle
+    previousMillis = currentMillis;
+  }
+
   if (millis() - lastMillis > 200)
   {
     int temp = localBrightness;
